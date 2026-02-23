@@ -128,16 +128,22 @@ export default function SBCashbackTracker() {
   const addTransaction = () => {
     if (!form.amount || !form.description) return;
     const dateVal = form.date || todayStr;
+    const txnId = Date.now();
+
+    let linkedGiftCardId = "";
 
     if (form.type === "giftcard_purchase") {
+      const gcId = txnId; // same ID links transaction ↔ gift card
+      linkedGiftCardId = String(gcId);
       setGiftCards([...giftCards, {
-        id: Date.now(), wallet: form.wallet, originalAmount: amountNum,
+        id: gcId, wallet: form.wallet, originalAmount: amountNum,
         remainingAmount: amountNum, description: form.description, date: dateVal,
         discountPct: gcDiscountPct, paidAmount: actualPaid,
       }]);
     }
 
     if (form.type === "giftcard_spend" && form.giftCardId) {
+      linkedGiftCardId = form.giftCardId;
       setGiftCards((prev) => prev.map((gc) =>
         gc.id === Number(form.giftCardId)
           ? { ...gc, remainingAmount: Math.max(0, gc.remainingAmount - amountNum) }
@@ -146,9 +152,9 @@ export default function SBCashbackTracker() {
     }
 
     setTransactions([...transactions, {
-      ...form, id: Date.now(), amount: amountNum, savings: isIncome ? 0 : totalSaving,
+      ...form, id: txnId, amount: amountNum, savings: isIncome ? 0 : totalSaving,
       savingsPct: isIncome ? 0 : savingsPct, gcDiscountPct: form.type === "giftcard_purchase" ? gcDiscountPct : 0,
-      paidAmount: actualPaid, date: dateVal,
+      paidAmount: actualPaid, date: dateVal, linkedGiftCardId,
     }]);
 
     setForm((prev) => ({
@@ -157,7 +163,30 @@ export default function SBCashbackTracker() {
     }));
   };
 
-  const removeTransaction = (id) => setTransactions(transactions.filter((t) => t.id !== id));
+  const removeTransaction = (id) => {
+    const txn = transactions.find((t) => t.id === id);
+    if (txn) {
+      if (txn.type === "giftcard_purchase") {
+        // Remove the gift card that was created with this transaction
+        const gcId = Number(txn.linkedGiftCardId || txn.id);
+        setGiftCards((prev) => prev.filter((gc) => gc.id !== gcId));
+      }
+      if (txn.type === "giftcard_spend" && txn.linkedGiftCardId) {
+        // Restore the amount back to the gift card
+        setGiftCards((prev) => prev.map((gc) =>
+          gc.id === Number(txn.linkedGiftCardId)
+            ? { ...gc, remainingAmount: gc.remainingAmount + txn.amount }
+            : gc
+        ));
+      }
+    }
+    setTransactions(transactions.filter((t) => t.id !== id));
+  };
+
+  const removeGiftCard = (gcId) => {
+    setGiftCards((prev) => prev.filter((gc) => gc.id !== gcId));
+  };
+
 
   /* ── summary calculations ── */
   const summary = useMemo(() => {
@@ -460,6 +489,10 @@ export default function SBCashbackTracker() {
                         Remaining: ₹{g.remainingAmount} • {g.date}
                       </p>
                     </div>
+                    <Button variant="ghost" size="icon" onClick={() => removeGiftCard(g.id)}
+                      className="text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0 ml-2">
+                      <Trash2 size={16} />
+                    </Button>
                   </div>
                 );
               })}

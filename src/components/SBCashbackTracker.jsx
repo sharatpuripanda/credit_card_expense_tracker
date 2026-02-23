@@ -8,7 +8,8 @@ import {
 import { motion } from "framer-motion";
 import {
   PlusCircle, Trash2, Plus, CreditCard, Gift, ShoppingBag,
-  Wallet, TrendingUp, IndianRupee, Percent,
+  Wallet, TrendingUp, IndianRupee, Percent, ArrowDownCircle,
+  ArrowUpCircle, CalendarDays,
 } from "lucide-react";
 
 /* ── constants ── */
@@ -27,11 +28,14 @@ const wc = (w) => WALLET_COLORS[w?.toLowerCase()] || FALLBACK_COLOR;
 
 const SUMMARY_STYLES = [
   { bg: "bg-violet-50",  border: "border-violet-200",  text: "text-violet-700",  icon: IndianRupee },
-  { bg: "bg-sky-50",     border: "border-sky-200",     text: "text-sky-700",     icon: CreditCard },
+  { bg: "bg-sky-50",     border: "border-sky-200",     text: "text-sky-700",     icon: CalendarDays },
   { bg: "bg-indigo-50",  border: "border-indigo-200",  text: "text-indigo-700",  icon: CreditCard },
   { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", icon: TrendingUp },
   { bg: "bg-green-50",   border: "border-green-200",   text: "text-green-700",   icon: Percent },
   { bg: "bg-teal-50",    border: "border-teal-200",    text: "text-teal-700",    icon: Gift },
+  { bg: "bg-cyan-50",    border: "border-cyan-200",    text: "text-cyan-700",    icon: ArrowDownCircle },
+  { bg: "bg-lime-50",    border: "border-lime-200",    text: "text-lime-700",    icon: ArrowUpCircle },
+  { bg: "bg-rose-50",    border: "border-rose-200",    text: "text-rose-700",    icon: IndianRupee },
 ];
 
 /* ── billing cycle 24th→23rd ── */
@@ -92,6 +96,8 @@ export default function SBCashbackTracker() {
   // Successive discount: A + B - (A*B/100)
   // e.g. 3% GC discount + 5% savings = 3 + 5 - (3*5/100) = 7.85%
   const isGCPurchase = form.type === "giftcard_purchase";
+  const isIncome = form.type === "income";
+  const isExpense = !isIncome;
   const effectivePct = isGCPurchase && gcDiscountPct > 0
     ? savingsPct + gcDiscountPct - (savingsPct * gcDiscountPct / 100)
     : savingsPct;
@@ -132,8 +138,8 @@ export default function SBCashbackTracker() {
     }
 
     setTransactions([...transactions, {
-      ...form, id: Date.now(), amount: amountNum, savings: totalSaving,
-      savingsPct, gcDiscountPct: form.type === "giftcard_purchase" ? gcDiscountPct : 0,
+      ...form, id: Date.now(), amount: amountNum, savings: isIncome ? 0 : totalSaving,
+      savingsPct: isIncome ? 0 : savingsPct, gcDiscountPct: form.type === "giftcard_purchase" ? gcDiscountPct : 0,
       paidAmount: actualPaid, date: dateVal,
     }]);
 
@@ -147,11 +153,17 @@ export default function SBCashbackTracker() {
 
   /* ── summary calculations ── */
   const summary = useMemo(() => {
-    const overallSpent = transactions.reduce((s, t) => s + t.amount, 0);
+    const expenseTxns = transactions.filter((t) => t.type !== "income");
+    const incomeTxns = transactions.filter((t) => t.type === "income");
+
+    const overallSpent = expenseTxns.reduce((s, t) => s + t.amount, 0);
+    const totalIncome = incomeTxns.reduce((s, t) => s + t.amount, 0);
+    const netBalance = totalIncome - overallSpent;
+
     const cardSpend = transactions
       .filter((t) => t.type === "card" || t.type === "giftcard_purchase")
       .reduce((s, t) => s + t.amount, 0);
-    const overallSavings = transactions.reduce((s, t) => s + Number(t.savings || 0), 0);
+    const overallSavings = expenseTxns.reduce((s, t) => s + Number(t.savings || 0), 0);
     const totalGiftLeft = giftCards.reduce((s, g) => s + g.remainingAmount, 0);
 
     const walletBalances = {};
@@ -160,26 +172,36 @@ export default function SBCashbackTracker() {
     }
 
     const { cycleStart, cycleEnd } = getBillingCycleRange();
-    const billingCycleSpend = transactions.filter((t) => {
+    const billingCycleSpend = expenseTxns.filter((t) => {
       if (!t.date) return false;
       const d = new Date(t.date + "T00:00:00");
       return d >= cycleStart && d <= cycleEnd;
     }).reduce((s, t) => s + t.amount, 0);
 
-    return { overallSpent, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cashback: cardSpend * 0.01 };
+    // Today's spend
+    const todayISO = new Date().toISOString().split("T")[0];
+    const todaySpend = expenseTxns
+      .filter((t) => t.date === todayISO)
+      .reduce((s, t) => s + t.amount, 0);
+
+    return { overallSpent, totalIncome, netBalance, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cashback: cardSpend * 0.01, todaySpend };
   }, [transactions, giftCards, allWallets]);
 
   /* ── render ── */
   const showWallet = form.type === "giftcard_purchase";
   const showGCPicker = form.type === "giftcard_spend";
+  const showSavings = isExpense;
 
   const summaryCards = [
     { title: "Overall Spent",                    value: summary.overallSpent,      idx: 0 },
-    { title: `Cycle (${fmtCycle()})`,            value: summary.billingCycleSpend, idx: 1 },
-    { title: "SB Card Utilized",                 value: summary.cardSpend,         idx: 2 },
-    { title: "Est. Cashback (1%)",               value: summary.cashback,          idx: 3 },
-    { title: "Overall Savings",                  value: summary.overallSavings,    idx: 4 },
-    { title: "Total Gift Cards Left",            value: summary.totalGiftLeft,     idx: 5 },
+    { title: "Today's Spend",                    value: summary.todaySpend,        idx: 1 },
+    { title: `Cycle (${fmtCycle()})`,            value: summary.billingCycleSpend, idx: 2 },
+    { title: "SBI Card Utilized",                 value: summary.cardSpend,         idx: 3 },
+    { title: "Est. Cashback (1%)",               value: summary.cashback,          idx: 4 },
+    { title: "Overall Savings",                  value: summary.overallSavings,    idx: 5 },
+    { title: "Total Income",                     value: summary.totalIncome,       idx: 6 },
+    { title: "Total Gift Cards Left",            value: summary.totalGiftLeft,     idx: 7 },
+    { title: "Net Balance",                      value: summary.netBalance,        idx: 8 },
   ];
 
   return (
@@ -188,11 +210,9 @@ export default function SBCashbackTracker() {
 
         {/* HEADER */}
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-indigo-100">
-            <CreditCard className="text-indigo-600" size={28} />
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">
-            SB Credit Card & Gift Card Tracker
+          <img src="/sbi-logo.svg" alt="SBI" className="w-10 h-10" />
+          <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-800 to-blue-500 bg-clip-text text-transparent">
+            SBI Credit Card & Gift Card Tracker
           </h1>
         </motion.div>
 
@@ -215,17 +235,21 @@ export default function SBCashbackTracker() {
                 <Input type="number" placeholder="0" value={form.amount}
                   onChange={(e) => setForm({ ...form, amount: e.target.value })} />
               </Field>
-              <Field label={`Savings % (default ${DEFAULT_SAVINGS_PCT}%)`}>
-                <Input type="number" placeholder={String(DEFAULT_SAVINGS_PCT)} value={form.savingsPct}
-                  onChange={(e) => setForm({ ...form, savingsPct: e.target.value })} />
-              </Field>
+              {showSavings && (
+                <Field label={`Savings % (default ${DEFAULT_SAVINGS_PCT}%)`}>
+                  <Input type="number" placeholder={String(DEFAULT_SAVINGS_PCT)} value={form.savingsPct}
+                    onChange={(e) => setForm({ ...form, savingsPct: e.target.value })} />
+                </Field>
+              )}
               <Field label="Type">
                 <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
                   <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="card">Card Spend</SelectItem>
+                    <SelectItem value="daily_spend">Daily Spend (Cash/UPI)</SelectItem>
                     <SelectItem value="giftcard_purchase">Buy Gift Card</SelectItem>
                     <SelectItem value="giftcard_spend">Spend Gift Card</SelectItem>
+                    <SelectItem value="income">Income / Money Received</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
@@ -293,7 +317,7 @@ export default function SBCashbackTracker() {
             </div>
 
             {/* Live savings preview */}
-            {amountNum > 0 && (
+            {amountNum > 0 && isExpense && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                 className="mt-4 p-3 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 text-sm">
                 <div className="flex flex-wrap gap-x-6 gap-y-1">
@@ -320,7 +344,7 @@ export default function SBCashbackTracker() {
         </Card>
 
         {/* ── SUMMARY CARDS ── */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-3">
           {summaryCards.map(({ title, value, idx }) => {
             const s = SUMMARY_STYLES[idx % SUMMARY_STYLES.length];
             const Icon = s.icon;
@@ -417,16 +441,22 @@ export default function SBCashbackTracker() {
                   ? "bg-indigo-100 text-indigo-700"
                   : t.type === "giftcard_purchase"
                     ? "bg-amber-100 text-amber-700"
-                    : "bg-emerald-100 text-emerald-700";
+                    : t.type === "income"
+                      ? "bg-green-100 text-green-700"
+                      : t.type === "daily_spend"
+                        ? "bg-rose-100 text-rose-700"
+                        : "bg-emerald-100 text-emerald-700";
+                const typeLabel = { card: "Card", giftcard_purchase: "GC Buy", giftcard_spend: "GC Spend", income: "Income", daily_spend: "Daily" }[t.type] || t.type;
+                const isIncomeRow = t.type === "income";
                 return (
-                  <div key={t.id} className="flex justify-between items-center border rounded-xl p-3 hover:bg-slate-50 transition-colors">
+                  <div key={t.id} className={`flex justify-between items-center border rounded-xl p-3 hover:bg-slate-50 transition-colors ${isIncomeRow ? "border-green-200 bg-green-50/50" : ""}`}>
                     <div>
                       <p className="font-medium text-slate-800">{t.description}</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColor}`}>
-                          {t.type === "card" ? "Card" : t.type === "giftcard_purchase" ? "GC Buy" : "GC Spend"}
+                          {typeLabel}
                         </span>
-                        {t.wallet && t.type !== "card" && (
+                        {t.wallet && t.type !== "card" && t.type !== "income" && t.type !== "daily_spend" && (
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${wc(t.wallet).badge}`}>
                             {t.wallet}
                           </span>
@@ -436,7 +466,9 @@ export default function SBCashbackTracker() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <span className="font-semibold text-slate-800">₹{t.amount}</span>
+                        <span className={`font-semibold ${isIncomeRow ? "text-green-600" : "text-slate-800"}`}>
+                          {isIncomeRow ? "+" : ""}₹{t.amount}
+                        </span>
                         {t.savings > 0 && (
                           <p className="text-xs text-emerald-600">saved ₹{Number(t.savings).toFixed(2)}</p>
                         )}

@@ -76,8 +76,10 @@ export default function SBCashbackTracker() {
   useEffect(() => localStorage.setItem("sb-wallets", JSON.stringify(customWallets)), [customWallets]);
 
   const allWallets = useMemo(() => {
-    return [...new Set([...DEFAULT_WALLETS, ...customWallets].map((w) => w.toLowerCase()))];
-  }, [customWallets]);
+    // Always include defaults + custom + any wallet already used in gift cards
+    const fromGiftCards = giftCards.map((g) => g.wallet?.toLowerCase()).filter(Boolean);
+    return [...new Set([...DEFAULT_WALLETS, ...customWallets, ...fromGiftCards].map((w) => w.toLowerCase()))];
+  }, [customWallets, giftCards]);
 
   /* ── form state ── */
   const todayStr = new Date().toISOString().split("T")[0];
@@ -143,10 +145,10 @@ export default function SBCashbackTracker() {
       paidAmount: actualPaid, date: dateVal,
     }]);
 
-    setForm({
+    setForm((prev) => ({
       date: todayStr, description: "", amount: "", savingsPct: String(DEFAULT_SAVINGS_PCT),
-      type: "card", wallet: "amazon", giftCardId: "", gcDiscountPct: "",
-    });
+      type: "card", wallet: prev.wallet, giftCardId: "", gcDiscountPct: "",
+    }));
   };
 
   const removeTransaction = (id) => setTransactions(transactions.filter((t) => t.id !== id));
@@ -172,11 +174,13 @@ export default function SBCashbackTracker() {
     }
 
     const { cycleStart, cycleEnd } = getBillingCycleRange();
-    const billingCycleSpend = expenseTxns.filter((t) => {
+    const inCycle = (t) => {
       if (!t.date) return false;
       const d = new Date(t.date + "T00:00:00");
       return d >= cycleStart && d <= cycleEnd;
-    }).reduce((s, t) => s + t.amount, 0);
+    };
+    const billingCycleSpend = expenseTxns.filter(inCycle).reduce((s, t) => s + t.amount, 0);
+    const cycleIncome = incomeTxns.filter(inCycle).reduce((s, t) => s + t.amount, 0);
 
     // Today's spend
     const todayISO = new Date().toISOString().split("T")[0];
@@ -184,7 +188,7 @@ export default function SBCashbackTracker() {
       .filter((t) => t.date === todayISO)
       .reduce((s, t) => s + t.amount, 0);
 
-    return { overallSpent, totalIncome, netBalance, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cashback: cardSpend * 0.01, todaySpend };
+    return { overallSpent, totalIncome, netBalance, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cycleIncome, cashback: cardSpend * 0.01, todaySpend };
   }, [transactions, giftCards, allWallets]);
 
   /* ── render ── */
@@ -192,16 +196,19 @@ export default function SBCashbackTracker() {
   const showGCPicker = form.type === "giftcard_spend";
   const showSavings = isExpense;
 
+  const cycleLabel = fmtCycle();
+
   const summaryCards = [
-    { title: "Overall Spent",                    value: summary.overallSpent,      idx: 0 },
-    { title: "Today's Spend",                    value: summary.todaySpend,        idx: 1 },
-    { title: `Cycle (${fmtCycle()})`,            value: summary.billingCycleSpend, idx: 2 },
-    { title: "SBI Card Utilized",                 value: summary.cardSpend,         idx: 3 },
-    { title: "Est. Cashback (1%)",               value: summary.cashback,          idx: 4 },
-    { title: "Overall Savings",                  value: summary.overallSavings,    idx: 5 },
-    { title: "Total Income",                     value: summary.totalIncome,       idx: 6 },
-    { title: "Total Gift Cards Left",            value: summary.totalGiftLeft,     idx: 7 },
-    { title: "Net Balance",                      value: summary.netBalance,        idx: 8 },
+    { title: "Overall Spent",                       value: summary.overallSpent,      idx: 0 },
+    { title: "Today's Spend",                       value: summary.todaySpend,        idx: 1 },
+    { title: `Cycle Spend (${cycleLabel})`,         value: summary.billingCycleSpend, idx: 2 },
+    { title: `Cycle Income (${cycleLabel})`,        value: summary.cycleIncome,       idx: 3 },
+    { title: "SBI Card Utilized",                   value: summary.cardSpend,         idx: 4 },
+    { title: "Est. Cashback (1%)",                  value: summary.cashback,          idx: 5 },
+    { title: "Overall Savings",                     value: summary.overallSavings,    idx: 6 },
+    { title: "Total Income",                        value: summary.totalIncome,       idx: 7 },
+    { title: "Total Gift Cards Left",               value: summary.totalGiftLeft,     idx: 8 },
+    { title: "Net Balance",                         value: summary.netBalance,        idx: 9 },
   ];
 
   return (
@@ -259,11 +266,14 @@ export default function SBCashbackTracker() {
                 <Field label="Platform">
                   {showAddWallet ? (
                     <div className="flex gap-1">
-                      <Input placeholder="e.g. Myntra" value={newWalletName}
+                      <Input placeholder="e.g. PS5, Myntra" value={newWalletName}
                         onChange={(e) => setNewWalletName(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && addWallet()} />
                       <Button onClick={addWallet} size="icon" className="shrink-0 bg-emerald-600 hover:bg-emerald-700">
                         <Plus size={14} />
+                      </Button>
+                      <Button onClick={() => setShowAddWallet(false)} size="icon" variant="ghost" className="shrink-0 text-slate-400">
+                        ✕
                       </Button>
                     </div>
                   ) : (
@@ -344,7 +354,7 @@ export default function SBCashbackTracker() {
         </Card>
 
         {/* ── SUMMARY CARDS ── */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           {summaryCards.map(({ title, value, idx }) => {
             const s = SUMMARY_STYLES[idx % SUMMARY_STYLES.length];
             const Icon = s.icon;

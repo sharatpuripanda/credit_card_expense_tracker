@@ -89,6 +89,7 @@ export default function SBCashbackTracker() {
   });
   const [newWalletName, setNewWalletName] = useState("");
   const [showAddWallet, setShowAddWallet] = useState(false);
+  const [manageWallets, setManageWallets] = useState(false);
 
   // Auto-compute savings when amount or savingsPct changes
   const amountNum = Number(form.amount) || 0;
@@ -108,7 +109,7 @@ export default function SBCashbackTracker() {
   const baseSaving = amountNum * (savingsPct / 100);
   const actualPaid = isGCPurchase ? amountNum - gcDiscountSaving : amountNum;
 
-  /* ── add wallet ── */
+  /* ── add / remove wallet ── */
   const addWallet = () => {
     const name = newWalletName.trim().toLowerCase();
     if (!name || allWallets.includes(name)) return;
@@ -116,6 +117,11 @@ export default function SBCashbackTracker() {
     setNewWalletName("");
     setShowAddWallet(false);
     setForm({ ...form, wallet: name });
+  };
+
+  const removeWallet = (name) => {
+    setCustomWallets(customWallets.filter((w) => w.toLowerCase() !== name.toLowerCase()));
+    if (form.wallet === name) setForm({ ...form, wallet: "amazon" });
   };
 
   /* ── add / remove transaction ── */
@@ -188,7 +194,7 @@ export default function SBCashbackTracker() {
       .filter((t) => t.date === todayISO)
       .reduce((s, t) => s + t.amount, 0);
 
-    return { overallSpent, totalIncome, netBalance, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cycleIncome, cashback: cardSpend * 0.01, todaySpend };
+    return { overallSpent, totalIncome, netBalance, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cycleIncome, todaySpend };
   }, [transactions, giftCards, allWallets]);
 
   /* ── render ── */
@@ -204,11 +210,10 @@ export default function SBCashbackTracker() {
     { title: `Cycle Spend (${cycleLabel})`,         value: summary.billingCycleSpend, idx: 2 },
     { title: `Cycle Income (${cycleLabel})`,        value: summary.cycleIncome,       idx: 3 },
     { title: "SBI Card Utilized",                   value: summary.cardSpend,         idx: 4 },
-    { title: "Est. Cashback (1%)",                  value: summary.cashback,          idx: 5 },
-    { title: "Overall Savings",                     value: summary.overallSavings,    idx: 6 },
-    { title: "Total Income",                        value: summary.totalIncome,       idx: 7 },
-    { title: "Total Gift Cards Left",               value: summary.totalGiftLeft,     idx: 8 },
-    { title: "Net Balance",                         value: summary.netBalance,        idx: 9 },
+    { title: "Overall Savings",                     value: summary.overallSavings,    idx: 5 },
+    { title: "Total Income",                        value: summary.totalIncome,       idx: 6 },
+    { title: "Total Gift Cards Left",               value: summary.totalGiftLeft,     idx: 7 },
+    { title: "Net Balance",                         value: summary.netBalance,        idx: 8 },
   ];
 
   return (
@@ -276,6 +281,27 @@ export default function SBCashbackTracker() {
                         ✕
                       </Button>
                     </div>
+                  ) : manageWallets ? (
+                    <div className="flex flex-col gap-1">
+                      {allWallets.map((w) => {
+                        const isDefault = DEFAULT_WALLETS.includes(w);
+                        return (
+                          <div key={w} className="flex items-center justify-between rounded-md border px-2 py-1 text-sm">
+                            <span>{w.charAt(0).toUpperCase() + w.slice(1)}</span>
+                            {!isDefault && (
+                              <button onClick={() => removeWallet(w)}
+                                className="text-red-400 hover:text-red-600 ml-2" title="Remove">
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                            {isDefault && <span className="text-xs text-muted-foreground">default</span>}
+                          </div>
+                        );
+                      })}
+                      <Button onClick={() => setManageWallets(false)} variant="ghost" className="text-xs h-7">
+                        Done
+                      </Button>
+                    </div>
                   ) : (
                     <div className="flex gap-1">
                       <Select value={form.wallet} onValueChange={(v) => setForm({ ...form, wallet: v })}>
@@ -290,6 +316,12 @@ export default function SBCashbackTracker() {
                         className="shrink-0 text-indigo-500 hover:text-indigo-700" title="Add new platform">
                         <Plus size={16} />
                       </Button>
+                      {customWallets.length > 0 && (
+                        <Button onClick={() => setManageWallets(true)} size="icon" variant="ghost"
+                          className="shrink-0 text-red-400 hover:text-red-600" title="Remove a platform">
+                          <Trash2 size={14} />
+                        </Button>
+                      )}
                     </div>
                   )}
                 </Field>

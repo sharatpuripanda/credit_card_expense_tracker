@@ -1,393 +1,468 @@
-import React, { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { motion } from "framer-motion";
-import { PlusCircle, Trash2 } from "lucide-react";
+import {
+  PlusCircle, Trash2, Plus, CreditCard, Gift, ShoppingBag,
+  Wallet, TrendingUp, IndianRupee, Percent,
+} from "lucide-react";
 
-// Billing cycle: 24th of previous month → 23rd of current month
+/* ── constants ── */
+const DEFAULT_WALLETS = ["amazon", "flipkart"];
+const DEFAULT_SAVINGS_PCT = 5;
+
+const WALLET_COLORS = {
+  amazon:   { bg: "bg-orange-50",  border: "border-orange-200", text: "text-orange-700",  badge: "bg-orange-100 text-orange-800" },
+  flipkart: { bg: "bg-blue-50",    border: "border-blue-200",   text: "text-blue-700",    badge: "bg-blue-100 text-blue-800" },
+  myntra:   { bg: "bg-pink-50",    border: "border-pink-200",   text: "text-pink-700",    badge: "bg-pink-100 text-pink-800" },
+  swiggy:   { bg: "bg-amber-50",   border: "border-amber-300",  text: "text-amber-700",   badge: "bg-amber-100 text-amber-800" },
+  zomato:   { bg: "bg-red-50",     border: "border-red-200",    text: "text-red-700",     badge: "bg-red-100 text-red-800" },
+};
+const FALLBACK_COLOR = { bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-700", badge: "bg-purple-100 text-purple-800" };
+const wc = (w) => WALLET_COLORS[w?.toLowerCase()] || FALLBACK_COLOR;
+
+const SUMMARY_STYLES = [
+  { bg: "bg-violet-50",  border: "border-violet-200",  text: "text-violet-700",  icon: IndianRupee },
+  { bg: "bg-sky-50",     border: "border-sky-200",     text: "text-sky-700",     icon: CreditCard },
+  { bg: "bg-indigo-50",  border: "border-indigo-200",  text: "text-indigo-700",  icon: CreditCard },
+  { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", icon: TrendingUp },
+  { bg: "bg-green-50",   border: "border-green-200",   text: "text-green-700",   icon: Percent },
+  { bg: "bg-teal-50",    border: "border-teal-200",    text: "text-teal-700",    icon: Gift },
+];
+
+/* ── billing cycle 24th→23rd ── */
 function getBillingCycleRange() {
-  const now = new Date();
-  const day = now.getDate();
-  let cycleStart, cycleEnd;
-
+  const now = new Date(), day = now.getDate();
   if (day >= 24) {
-    // We're in the cycle that started on the 24th of this month
-    cycleStart = new Date(now.getFullYear(), now.getMonth(), 24);
-    cycleEnd = new Date(now.getFullYear(), now.getMonth() + 1, 23, 23, 59, 59);
-  } else {
-    // We're in the cycle that started on the 24th of last month
-    cycleStart = new Date(now.getFullYear(), now.getMonth() - 1, 24);
-    cycleEnd = new Date(now.getFullYear(), now.getMonth(), 23, 23, 59, 59);
+    return {
+      cycleStart: new Date(now.getFullYear(), now.getMonth(), 24),
+      cycleEnd:   new Date(now.getFullYear(), now.getMonth() + 1, 23, 23, 59, 59),
+    };
   }
-  return { cycleStart, cycleEnd };
+  return {
+    cycleStart: new Date(now.getFullYear(), now.getMonth() - 1, 24),
+    cycleEnd:   new Date(now.getFullYear(), now.getMonth(), 23, 23, 59, 59),
+  };
 }
 
-function formatCycleLabel() {
+function fmtCycle() {
   const { cycleStart, cycleEnd } = getBillingCycleRange();
-  const fmt = (d) =>
-    d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-  return `${fmt(cycleStart)} – ${fmt(cycleEnd)}`;
+  const f = (d) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return `${f(cycleStart)} – ${f(cycleEnd)}`;
 }
 
+/* ══════════════════════════════════════════════════════════════ */
 export default function SBCashbackTracker() {
-  // ================= STORAGE =================
-  const [transactions, setTransactions] = useState(() => {
-    const saved =
-      typeof window !== "undefined"
-        ? localStorage.getItem("sb-transactions")
-        : null;
-    return saved ? JSON.parse(saved) : [];
-  });
+  /* ── persisted state ── */
+  const load = (key, fallback) => {
+    const s = typeof window !== "undefined" ? localStorage.getItem(key) : null;
+    return s ? JSON.parse(s) : fallback;
+  };
 
-  const [giftCards, setGiftCards] = useState(() => {
-    const saved =
-      typeof window !== "undefined"
-        ? localStorage.getItem("sb-giftcards")
-        : null;
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [transactions, setTransactions] = useState(() => load("sb-transactions", []));
+  const [giftCards, setGiftCards]       = useState(() => load("sb-giftcards", []));
+  const [customWallets, setCustomWallets] = useState(() => load("sb-wallets", []));
 
-  useEffect(() => {
-    localStorage.setItem("sb-transactions", JSON.stringify(transactions));
-  }, [transactions]);
+  useEffect(() => localStorage.setItem("sb-transactions", JSON.stringify(transactions)), [transactions]);
+  useEffect(() => localStorage.setItem("sb-giftcards", JSON.stringify(giftCards)), [giftCards]);
+  useEffect(() => localStorage.setItem("sb-wallets", JSON.stringify(customWallets)), [customWallets]);
 
-  useEffect(() => {
-    localStorage.setItem("sb-giftcards", JSON.stringify(giftCards));
-  }, [giftCards]);
+  const allWallets = useMemo(() => {
+    return [...new Set([...DEFAULT_WALLETS, ...customWallets].map((w) => w.toLowerCase()))];
+  }, [customWallets]);
 
-  // ================= FORMS =================
+  /* ── form state ── */
   const todayStr = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState({
-    date: todayStr,
-    description: "",
-    amount: "",
-    savings: "",
-    type: "card",
-    wallet: "amazon",
-    giftCardId: "",
+    date: todayStr, description: "", amount: "", savingsPct: String(DEFAULT_SAVINGS_PCT),
+    type: "card", wallet: "amazon", giftCardId: "", gcDiscountPct: "",
   });
+  const [newWalletName, setNewWalletName] = useState("");
+  const [showAddWallet, setShowAddWallet] = useState(false);
 
-  // ================= ACTIONS =================
+  // Auto-compute savings when amount or savingsPct changes
+  const amountNum = Number(form.amount) || 0;
+  const savingsPct = Number(form.savingsPct) || 0;
+  const gcDiscountPct = Number(form.gcDiscountPct) || 0;
+
+  // Successive discount: A + B - (A*B/100)
+  // e.g. 3% GC discount + 5% savings = 3 + 5 - (3*5/100) = 7.85%
+  const isGCPurchase = form.type === "giftcard_purchase";
+  const effectivePct = isGCPurchase && gcDiscountPct > 0
+    ? savingsPct + gcDiscountPct - (savingsPct * gcDiscountPct / 100)
+    : savingsPct;
+  const totalSaving = amountNum * (effectivePct / 100);
+  const gcDiscountSaving = isGCPurchase ? amountNum * (gcDiscountPct / 100) : 0;
+  const baseSaving = amountNum * (savingsPct / 100);
+  const actualPaid = isGCPurchase ? amountNum - gcDiscountSaving : amountNum;
+
+  /* ── add wallet ── */
+  const addWallet = () => {
+    const name = newWalletName.trim().toLowerCase();
+    if (!name || allWallets.includes(name)) return;
+    setCustomWallets([...customWallets, name]);
+    setNewWalletName("");
+    setShowAddWallet(false);
+    setForm({ ...form, wallet: name });
+  };
+
+  /* ── add / remove transaction ── */
   const addTransaction = () => {
     if (!form.amount || !form.description) return;
-    const amountNum = Number(form.amount);
-    const savingsNum = Number(form.savings || 0);
     const dateVal = form.date || todayStr;
 
     if (form.type === "giftcard_purchase") {
-      const newCard = {
-        id: Date.now(),
-        wallet: form.wallet,
-        originalAmount: amountNum,
-        remainingAmount: amountNum,
-        description: form.description,
-        date: dateVal,
-      };
-      setGiftCards([...giftCards, newCard]);
+      setGiftCards([...giftCards, {
+        id: Date.now(), wallet: form.wallet, originalAmount: amountNum,
+        remainingAmount: amountNum, description: form.description, date: dateVal,
+        discountPct: gcDiscountPct, paidAmount: actualPaid,
+      }]);
     }
 
     if (form.type === "giftcard_spend" && form.giftCardId) {
-      setGiftCards((prev) =>
-        prev.map((gc) => {
-          if (gc.id === Number(form.giftCardId)) {
-            return {
-              ...gc,
-              remainingAmount: Math.max(0, gc.remainingAmount - amountNum),
-            };
-          }
-          return gc;
-        })
-      );
+      setGiftCards((prev) => prev.map((gc) =>
+        gc.id === Number(form.giftCardId)
+          ? { ...gc, remainingAmount: Math.max(0, gc.remainingAmount - amountNum) }
+          : gc
+      ));
     }
 
-    setTransactions([
-      ...transactions,
-      { ...form, id: Date.now(), amount: amountNum, savings: savingsNum, date: dateVal },
-    ]);
+    setTransactions([...transactions, {
+      ...form, id: Date.now(), amount: amountNum, savings: totalSaving,
+      savingsPct, gcDiscountPct: form.type === "giftcard_purchase" ? gcDiscountPct : 0,
+      paidAmount: actualPaid, date: dateVal,
+    }]);
+
     setForm({
-      date: todayStr,
-      description: "",
-      amount: "",
-      savings: "",
-      type: "card",
-      wallet: "amazon",
-      giftCardId: "",
+      date: todayStr, description: "", amount: "", savingsPct: String(DEFAULT_SAVINGS_PCT),
+      type: "card", wallet: "amazon", giftCardId: "", gcDiscountPct: "",
     });
   };
 
-  const removeTransaction = (id) => {
-    setTransactions(transactions.filter((t) => t.id !== id));
-  };
+  const removeTransaction = (id) => setTransactions(transactions.filter((t) => t.id !== id));
 
-  // ================= SUMMARY =================
+  /* ── summary calculations ── */
   const summary = useMemo(() => {
     const overallSpent = transactions.reduce((s, t) => s + t.amount, 0);
-
     const cardSpend = transactions
       .filter((t) => t.type === "card" || t.type === "giftcard_purchase")
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const overallSavings = transactions.reduce(
-      (s, t) => s + Number(t.savings || 0),
-      0
-    );
-
-    const amazonBalance = giftCards
-      .filter((g) => g.wallet === "amazon")
-      .reduce((s, g) => s + g.remainingAmount, 0);
-
-    const flipkartBalance = giftCards
-      .filter((g) => g.wallet === "flipkart")
-      .reduce((s, g) => s + g.remainingAmount, 0);
-
-    const totalGiftLeft = giftCards.reduce(
-      (s, g) => s + g.remainingAmount,
-      0
-    );
-
-    // Billing cycle spend (24th to 24th)
-    const { cycleStart, cycleEnd } = getBillingCycleRange();
-    const billingCycleSpend = transactions
-      .filter((t) => {
-        if (!t.date) return false;
-        const d = new Date(t.date + "T00:00:00");
-        return d >= cycleStart && d <= cycleEnd;
-      })
       .reduce((s, t) => s + t.amount, 0);
+    const overallSavings = transactions.reduce((s, t) => s + Number(t.savings || 0), 0);
+    const totalGiftLeft = giftCards.reduce((s, g) => s + g.remainingAmount, 0);
 
-    const cashback = cardSpend * 0.01;
+    const walletBalances = {};
+    for (const w of allWallets) {
+      walletBalances[w] = giftCards.filter((g) => g.wallet === w).reduce((s, g) => s + g.remainingAmount, 0);
+    }
 
-    return {
-      overallSpent,
-      cardSpend,
-      amazonBalance,
-      flipkartBalance,
-      totalGiftLeft,
-      billingCycleSpend,
-      cashback,
-      overallSavings,
-    };
-  }, [transactions, giftCards]);
+    const { cycleStart, cycleEnd } = getBillingCycleRange();
+    const billingCycleSpend = transactions.filter((t) => {
+      if (!t.date) return false;
+      const d = new Date(t.date + "T00:00:00");
+      return d >= cycleStart && d <= cycleEnd;
+    }).reduce((s, t) => s + t.amount, 0);
 
-  // ================= UI =================
+    return { overallSpent, cardSpend, overallSavings, totalGiftLeft, walletBalances, billingCycleSpend, cashback: cardSpend * 0.01 };
+  }, [transactions, giftCards, allWallets]);
+
+  /* ── render ── */
   const showWallet = form.type === "giftcard_purchase";
-  const showGiftCardPicker = form.type === "giftcard_spend";
+  const showGCPicker = form.type === "giftcard_spend";
+
+  const summaryCards = [
+    { title: "Overall Spent",                    value: summary.overallSpent,      idx: 0 },
+    { title: `Cycle (${fmtCycle()})`,            value: summary.billingCycleSpend, idx: 1 },
+    { title: "SB Card Utilized",                 value: summary.cardSpend,         idx: 2 },
+    { title: "Est. Cashback (1%)",               value: summary.cashback,          idx: 3 },
+    { title: "Overall Savings",                  value: summary.overallSavings,    idx: 4 },
+    { title: "Total Gift Cards Left",            value: summary.totalGiftLeft,     idx: 5 },
+  ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto grid gap-6">
-      <motion.h1
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-3xl font-bold"
-      >
-        SB Credit Card & Gift Card Tracker
-      </motion.h1>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto grid gap-6">
 
-      {/* INPUT FORM */}
-      <Card className="rounded-2xl shadow">
-        <CardContent className="p-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Date</label>
-            <Input
-              type="date"
-              value={form.date}
-              onChange={(e) => setForm({ ...form, date: e.target.value })}
-            />
+        {/* HEADER */}
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-indigo-100">
+            <CreditCard className="text-indigo-600" size={28} />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Description</label>
-            <Input
-              placeholder="e.g. Swiggy, Amazon order"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Amount (₹)</label>
-            <Input
-              type="number"
-              placeholder="0"
-              value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Savings / Discount (₹)</label>
-            <Input
-              type="number"
-              placeholder="0"
-              value={form.savings}
-              onChange={(e) => setForm({ ...form, savings: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Type</label>
-            <Select
-              value={form.type}
-              onValueChange={(v) => setForm({ ...form, type: v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="card">Card Spend</SelectItem>
-                <SelectItem value="giftcard_purchase">Buy Gift Card</SelectItem>
-                <SelectItem value="giftcard_spend">Spend Gift Card</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">
+            SB Credit Card & Gift Card Tracker
+          </h1>
+        </motion.div>
 
-          {/* Only show wallet picker when buying a gift card */}
-          {showWallet && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Platform</label>
-              <Select
-                value={form.wallet}
-                onValueChange={(v) => setForm({ ...form, wallet: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Wallet" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="amazon">Amazon</SelectItem>
-                  <SelectItem value="flipkart">Flipkart</SelectItem>
-                </SelectContent>
-              </Select>
+        {/* ── INPUT FORM ── */}
+        <Card className="rounded-2xl shadow-md border-indigo-100 border">
+          <CardContent className="p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <PlusCircle size={18} className="text-indigo-500" />
+              <span className="font-semibold text-indigo-900">New Transaction</span>
             </div>
-          )}
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <Field label="Date">
+                <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+              </Field>
+              <Field label="Description">
+                <Input placeholder="e.g. Swiggy, Amazon order" value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              </Field>
+              <Field label="Amount (₹)">
+                <Input type="number" placeholder="0" value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+              </Field>
+              <Field label={`Savings % (default ${DEFAULT_SAVINGS_PCT}%)`}>
+                <Input type="number" placeholder={String(DEFAULT_SAVINGS_PCT)} value={form.savingsPct}
+                  onChange={(e) => setForm({ ...form, savingsPct: e.target.value })} />
+              </Field>
+              <Field label="Type">
+                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                  <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="card">Card Spend</SelectItem>
+                    <SelectItem value="giftcard_purchase">Buy Gift Card</SelectItem>
+                    <SelectItem value="giftcard_spend">Spend Gift Card</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
 
-          {/* Only show gift card picker when spending a gift card */}
-          {showGiftCardPicker && (
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Gift Card</label>
-              <Select
-                value={form.giftCardId}
-                onValueChange={(v) => setForm({ ...form, giftCardId: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Gift Card" />
-                </SelectTrigger>
-                <SelectContent>
-                  {giftCards
-                    .filter((g) => g.remainingAmount > 0)
-                    .map((g) => (
-                      <SelectItem key={g.id} value={String(g.id)}>
-                        {g.wallet} • ₹{g.remainingAmount} left
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          <div className="flex flex-col justify-end">
-            <Button onClick={addTransaction} className="gap-2 w-full">
-              <PlusCircle size={16} /> Add
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* SUMMARY */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <SummaryCard title="Overall Spent" value={summary.overallSpent} />
-        <SummaryCard title={`Cycle Spend (${formatCycleLabel()})`} value={summary.billingCycleSpend} />
-        <SummaryCard title="SB Card Utilized" value={summary.cardSpend} />
-        <SummaryCard title="Est. Cashback (1%)" value={summary.cashback} />
-        <SummaryCard title="Overall Savings" value={summary.overallSavings} />
-        <SummaryCard title="Amazon Gift Left" value={summary.amazonBalance} />
-        <SummaryCard title="Flipkart Gift Left" value={summary.flipkartBalance} />
-        <SummaryCard title="Total Gift Cards Left" value={summary.totalGiftLeft} />
-      </div>
-
-      {/* GIFT CARD LIST */}
-      <Card className="rounded-2xl shadow">
-        <CardContent className="p-4">
-          <h2 className="text-xl font-semibold mb-3">Your Gift Cards</h2>
-          <div className="grid gap-2">
-            {giftCards.length === 0 && (
-              <p className="text-sm text-muted-foreground">No gift cards yet.</p>
-            )}
-            {giftCards.map((g) => (
-              <div
-                key={g.id}
-                className="flex justify-between border rounded-xl p-3"
-              >
-                <div>
-                  <p className="font-medium">
-                    {g.wallet} • ₹{g.originalAmount}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Remaining: ₹{g.remainingAmount}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* TRANSACTIONS */}
-      <Card className="rounded-2xl shadow">
-        <CardContent className="p-4">
-          <h2 className="text-xl font-semibold mb-3">Transactions</h2>
-          <div className="grid gap-2">
-            {transactions.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No transactions yet.
-              </p>
-            )}
-            {transactions.map((t) => (
-              <div
-                key={t.id}
-                className="flex justify-between items-center border rounded-xl p-3"
-              >
-                <div>
-                  <p className="font-medium">{t.description}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t.date || "No date"} • {t.type}
-                    {t.wallet && t.type !== "card" ? ` • ${t.wallet}` : ""}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold">₹{t.amount}</span>
-                  {t.savings > 0 && (
-                    <span className="text-xs text-green-600">saved ₹{t.savings}</span>
+              {/* Wallet picker — only for gift card purchase */}
+              {showWallet && (
+                <Field label="Platform">
+                  {showAddWallet ? (
+                    <div className="flex gap-1">
+                      <Input placeholder="e.g. Myntra" value={newWalletName}
+                        onChange={(e) => setNewWalletName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && addWallet()} />
+                      <Button onClick={addWallet} size="icon" className="shrink-0 bg-emerald-600 hover:bg-emerald-700">
+                        <Plus size={14} />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-1">
+                      <Select value={form.wallet} onValueChange={(v) => setForm({ ...form, wallet: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {allWallets.map((w) => (
+                            <SelectItem key={w} value={w}>{w.charAt(0).toUpperCase() + w.slice(1)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button onClick={() => setShowAddWallet(true)} size="icon" variant="ghost"
+                        className="shrink-0 text-indigo-500 hover:text-indigo-700" title="Add new platform">
+                        <Plus size={16} />
+                      </Button>
+                    </div>
                   )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeTransaction(t.id)}
-                  >
-                    <Trash2 size={16} />
-                  </Button>
-                </div>
+                </Field>
+              )}
+
+              {/* Gift card discount — only for gift card purchase */}
+              {showWallet && (
+                <Field label="Gift Card Discount %">
+                  <Input type="number" placeholder="0" value={form.gcDiscountPct}
+                    onChange={(e) => setForm({ ...form, gcDiscountPct: e.target.value })} />
+                </Field>
+              )}
+
+              {/* Gift card picker — only for spending */}
+              {showGCPicker && (
+                <Field label="Gift Card">
+                  <Select value={form.giftCardId} onValueChange={(v) => setForm({ ...form, giftCardId: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select Gift Card" /></SelectTrigger>
+                    <SelectContent>
+                      {giftCards.filter((g) => g.remainingAmount > 0).map((g) => (
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          {g.wallet} • ₹{g.remainingAmount} left
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+
+              <div className="flex flex-col justify-end">
+                <Button onClick={addTransaction} className="gap-2 w-full bg-indigo-600 hover:bg-indigo-700 text-white">
+                  <PlusCircle size={16} /> Add
+                </Button>
               </div>
-            ))}
+            </div>
+
+            {/* Live savings preview */}
+            {amountNum > 0 && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="mt-4 p-3 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 text-sm">
+                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                  <span className="text-emerald-700">
+                    Base saving ({savingsPct}%): <b>₹{baseSaving.toFixed(2)}</b>
+                  </span>
+                  {isGCPurchase && gcDiscountPct > 0 && (
+                    <span className="text-teal-700">
+                      + GC discount ({gcDiscountPct}%) → successive: {savingsPct} + {gcDiscountPct} − ({savingsPct}×{gcDiscountPct}/100) = <b>{effectivePct.toFixed(2)}%</b>
+                    </span>
+                  )}
+                  <span className="text-emerald-800 font-semibold">
+                    Total saved: ₹{totalSaving.toFixed(2)}
+                  </span>
+                  {isGCPurchase && gcDiscountPct > 0 && (
+                    <span className="text-slate-600">
+                      You pay: ₹{actualPaid.toFixed(2)} for ₹{amountNum} card
+                    </span>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── SUMMARY CARDS ── */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {summaryCards.map(({ title, value, idx }) => {
+            const s = SUMMARY_STYLES[idx % SUMMARY_STYLES.length];
+            const Icon = s.icon;
+            return (
+              <motion.div key={title} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.05 }}>
+                <Card className={`rounded-2xl shadow-sm border ${s.border} ${s.bg}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Icon size={14} className={s.text} />
+                      <p className={`text-xs font-medium ${s.text}`}>{title}</p>
+                    </div>
+                    <p className="text-xl font-bold text-slate-800">₹{Number(value || 0).toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {/* ── PER-WALLET GIFT CARD BALANCES ── */}
+        {Object.entries(summary.walletBalances).some(([, v]) => v > 0) && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Object.entries(summary.walletBalances).filter(([, v]) => v > 0).map(([wallet, bal]) => {
+              const c = wc(wallet);
+              return (
+                <Card key={wallet} className={`rounded-2xl shadow-sm border ${c.border} ${c.bg}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Wallet size={14} className={c.text} />
+                      <p className={`text-xs font-medium ${c.text}`}>{wallet.charAt(0).toUpperCase() + wallet.slice(1)} Gift Left</p>
+                    </div>
+                    <p className="text-xl font-bold text-slate-800">₹{bal.toFixed(2)}</p>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
-        </CardContent>
-      </Card>
+        )}
+
+        {/* ── GIFT CARD LIST ── */}
+        <Card className="rounded-2xl shadow-sm border border-amber-100">
+          <CardContent className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Gift size={18} className="text-amber-500" />
+              <h2 className="text-lg font-semibold text-amber-900">Your Gift Cards</h2>
+            </div>
+            <div className="grid gap-2">
+              {giftCards.length === 0 && (
+                <p className="text-sm text-muted-foreground">No gift cards yet.</p>
+              )}
+              {giftCards.map((g) => {
+                const c = wc(g.wallet);
+                const pct = g.originalAmount > 0 ? (g.remainingAmount / g.originalAmount) * 100 : 0;
+                return (
+                  <div key={g.id} className={`flex items-center justify-between border rounded-xl p-3 ${c.bg} ${c.border}`}>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.badge}`}>
+                          {g.wallet}
+                        </span>
+                        <span className="font-medium text-slate-800">₹{g.originalAmount}</span>
+                        {g.discountPct > 0 && (
+                          <span className="text-xs text-emerald-600">({g.discountPct}% off → paid ₹{g.paidAmount})</span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 w-full bg-slate-200 rounded-full h-1.5">
+                        <div className="bg-emerald-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Remaining: ₹{g.remainingAmount} • {g.date}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ── TRANSACTIONS ── */}
+        <Card className="rounded-2xl shadow-sm border border-slate-200">
+          <CardContent className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <ShoppingBag size={18} className="text-slate-500" />
+              <h2 className="text-lg font-semibold text-slate-800">Transactions</h2>
+            </div>
+            <div className="grid gap-2">
+              {transactions.length === 0 && (
+                <p className="text-sm text-muted-foreground">No transactions yet.</p>
+              )}
+              {transactions.map((t) => {
+                const typeColor = t.type === "card"
+                  ? "bg-indigo-100 text-indigo-700"
+                  : t.type === "giftcard_purchase"
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-emerald-100 text-emerald-700";
+                return (
+                  <div key={t.id} className="flex justify-between items-center border rounded-xl p-3 hover:bg-slate-50 transition-colors">
+                    <div>
+                      <p className="font-medium text-slate-800">{t.description}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColor}`}>
+                          {t.type === "card" ? "Card" : t.type === "giftcard_purchase" ? "GC Buy" : "GC Spend"}
+                        </span>
+                        {t.wallet && t.type !== "card" && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${wc(t.wallet).badge}`}>
+                            {t.wallet}
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground">{t.date || "No date"}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="font-semibold text-slate-800">₹{t.amount}</span>
+                        {t.savings > 0 && (
+                          <p className="text-xs text-emerald-600">saved ₹{Number(t.savings).toFixed(2)}</p>
+                        )}
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => removeTransaction(t.id)}
+                        className="text-red-400 hover:text-red-600 hover:bg-red-50">
+                        <Trash2 size={16} />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
 
-function SummaryCard({ title, value }) {
+/* ── tiny helper ── */
+function Field({ label, children }) {
   return (
-    <Card className="rounded-2xl shadow">
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{title}</p>
-        <p className="text-2xl font-bold mt-1">
-          ₹{Number(value || 0).toFixed(2)}
-        </p>
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-slate-500">{label}</label>
+      {children}
+    </div>
   );
 }

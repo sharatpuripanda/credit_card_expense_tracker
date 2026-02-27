@@ -10,6 +10,7 @@ import {
   PlusCircle, Trash2, Plus, Gift, ShoppingBag,
   Wallet, TrendingUp, IndianRupee, Percent, ArrowDownCircle,
   ArrowUpCircle, CalendarDays, Landmark, Download, Upload, LogOut,
+  Eye, EyeOff, Lock,
 } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 import {
@@ -82,6 +83,42 @@ export default function SBCashbackTracker() {
   const [customWallets, setCustomWallets] = useState([]);
   const [investments, setInvestments]   = useState([]);
   const [dbLoading, setDbLoading]       = useState(true);
+  const [locked, setLocked]             = useState(true);
+  const [pinInput, setPinInput]         = useState("");
+  const [pinError, setPinError]         = useState("");
+  const [settingPin, setSettingPin]     = useState(false);
+  const [newPin, setNewPin]             = useState("");
+
+  // PIN is stored per-user in localStorage (not sensitive — just a screen lock)
+  const pinKey = `sb-pin-${userId}`;
+  const savedPin = typeof window !== "undefined" ? localStorage.getItem(pinKey) : null;
+
+  const unlockApp = () => {
+    if (!savedPin) {
+      // No PIN set yet — prompt to create one
+      setSettingPin(true);
+      return;
+    }
+    if (pinInput === savedPin) {
+      setLocked(false);
+      setPinInput("");
+      setPinError("");
+    } else {
+      setPinError("Wrong PIN");
+    }
+  };
+
+  const savePin = () => {
+    if (newPin.length < 4) {
+      setPinError("PIN must be at least 4 digits");
+      return;
+    }
+    localStorage.setItem(pinKey, newPin);
+    setSettingPin(false);
+    setLocked(false);
+    setNewPin("");
+    setPinError("");
+  };
 
   // Track whether initial load is done to avoid saving back on mount
   const loaded = useRef(false);
@@ -335,6 +372,68 @@ export default function SBCashbackTracker() {
     );
   }
 
+  if (locked) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center p-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-xs">
+          <Card className="rounded-2xl shadow-lg border-indigo-100 border">
+            <CardContent className="p-6">
+              <div className="flex flex-col items-center gap-3 mb-5">
+                <Lock size={32} className="text-indigo-500" />
+                <h2 className="text-lg font-semibold text-slate-800">
+                  {settingPin ? "Set Your PIN" : "Enter PIN to Unlock"}
+                </h2>
+              </div>
+              {settingPin ? (
+                <div className="grid gap-3">
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    placeholder="Create a 4+ digit PIN"
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && savePin()}
+                    autoFocus
+                  />
+                  {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
+                  <Button onClick={savePin} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
+                    Save PIN
+                  </Button>
+                </div>
+              ) : !savedPin ? (
+                <div className="grid gap-3">
+                  <p className="text-sm text-slate-500 text-center">No PIN set yet. Create one to protect your data.</p>
+                  <Button onClick={() => setSettingPin(true)} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
+                    Set PIN
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    placeholder="Enter PIN"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && unlockApp()}
+                    autoFocus
+                  />
+                  {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
+                  <Button onClick={unlockApp} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
+                    Unlock
+                  </Button>
+                </div>
+              )}
+              <button onClick={signOut} className="text-xs text-slate-400 hover:text-slate-600 mt-4 w-full text-center">
+                Sign out instead
+              </button>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+    );
+  }
+
   const showWallet = isGCPurchase;
   const showGCPicker = form.type === "giftcard_spend";
   const showSavings = isExpense;
@@ -376,6 +475,9 @@ export default function SBCashbackTracker() {
             </h1>
           </div>
           <div className="flex gap-2">
+            <Button onClick={() => setLocked(true)} variant="ghost" size="icon" title="Lock app">
+              <Lock size={18} className="text-slate-500" />
+            </Button>
             <Button onClick={exportData} variant="ghost" size="icon" title="Export backup">
               <Download size={18} className="text-slate-500" />
             </Button>

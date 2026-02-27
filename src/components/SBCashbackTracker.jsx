@@ -83,24 +83,37 @@ export default function SBCashbackTracker() {
   const [customWallets, setCustomWallets] = useState([]);
   const [investments, setInvestments]   = useState([]);
   const [dbLoading, setDbLoading]       = useState(true);
-  const [locked, setLocked]             = useState(true);
+  const [hidden, setHidden]             = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput]         = useState("");
   const [pinError, setPinError]         = useState("");
   const [settingPin, setSettingPin]     = useState(false);
   const [newPin, setNewPin]             = useState("");
 
-  // PIN is stored per-user in localStorage (not sensitive — just a screen lock)
   const pinKey = `sb-pin-${userId}`;
   const savedPin = typeof window !== "undefined" ? localStorage.getItem(pinKey) : null;
 
-  const unlockApp = () => {
-    if (!savedPin) {
-      // No PIN set yet — prompt to create one
-      setSettingPin(true);
+  const toggleHide = () => {
+    if (!hidden) {
+      // Hiding — just hide immediately
+      setHidden(true);
       return;
     }
+    // Unhiding — need PIN
+    if (!savedPin) {
+      // No PIN set, just unhide
+      setHidden(false);
+      return;
+    }
+    setShowPinModal(true);
+    setPinInput("");
+    setPinError("");
+  };
+
+  const unlockApp = () => {
     if (pinInput === savedPin) {
-      setLocked(false);
+      setHidden(false);
+      setShowPinModal(false);
       setPinInput("");
       setPinError("");
     } else {
@@ -115,10 +128,13 @@ export default function SBCashbackTracker() {
     }
     localStorage.setItem(pinKey, newPin);
     setSettingPin(false);
-    setLocked(false);
+    setShowPinModal(false);
     setNewPin("");
     setPinError("");
   };
+
+  // Helper to mask amounts
+  const amt = (value) => hidden ? "••••" : `₹${Number(value || 0).toFixed(2)}`;
 
   // Track whether initial load is done to avoid saving back on mount
   const loaded = useRef(false);
@@ -372,68 +388,6 @@ export default function SBCashbackTracker() {
     );
   }
 
-  if (locked) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 flex items-center justify-center p-4">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-xs">
-          <Card className="rounded-2xl shadow-lg border-indigo-100 border">
-            <CardContent className="p-6">
-              <div className="flex flex-col items-center gap-3 mb-5">
-                <Lock size={32} className="text-indigo-500" />
-                <h2 className="text-lg font-semibold text-slate-800">
-                  {settingPin ? "Set Your PIN" : "Enter PIN to Unlock"}
-                </h2>
-              </div>
-              {settingPin ? (
-                <div className="grid gap-3">
-                  <Input
-                    type="password"
-                    inputMode="numeric"
-                    placeholder="Create a 4+ digit PIN"
-                    value={newPin}
-                    onChange={(e) => setNewPin(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && savePin()}
-                    autoFocus
-                  />
-                  {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
-                  <Button onClick={savePin} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
-                    Save PIN
-                  </Button>
-                </div>
-              ) : !savedPin ? (
-                <div className="grid gap-3">
-                  <p className="text-sm text-slate-500 text-center">No PIN set yet. Create one to protect your data.</p>
-                  <Button onClick={() => setSettingPin(true)} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
-                    Set PIN
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid gap-3">
-                  <Input
-                    type="password"
-                    inputMode="numeric"
-                    placeholder="Enter PIN"
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && unlockApp()}
-                    autoFocus
-                  />
-                  {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
-                  <Button onClick={unlockApp} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
-                    Unlock
-                  </Button>
-                </div>
-              )}
-              <button onClick={signOut} className="text-xs text-slate-400 hover:text-slate-600 mt-4 w-full text-center">
-                Sign out instead
-              </button>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-    );
-  }
-
   const showWallet = isGCPurchase;
   const showGCPicker = form.type === "giftcard_spend";
   const showSavings = isExpense;
@@ -475,9 +429,14 @@ export default function SBCashbackTracker() {
             </h1>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => setLocked(true)} variant="ghost" size="icon" title="Lock app">
-              <Lock size={18} className="text-slate-500" />
+            <Button onClick={toggleHide} variant="ghost" size="icon" title={hidden ? "Show amounts" : "Hide amounts"}>
+              {hidden ? <EyeOff size={18} className="text-red-400" /> : <Eye size={18} className="text-slate-500" />}
             </Button>
+            {!savedPin && (
+              <Button onClick={() => { setSettingPin(true); setShowPinModal(true); setPinError(""); setNewPin(""); }} variant="ghost" size="icon" title="Set PIN">
+                <Lock size={18} className="text-slate-500" />
+              </Button>
+            )}
             <Button onClick={exportData} variant="ghost" size="icon" title="Export backup">
               <Download size={18} className="text-slate-500" />
             </Button>
@@ -489,6 +448,41 @@ export default function SBCashbackTracker() {
             </Button>
           </div>
         </motion.div>
+
+        {/* ── PIN MODAL ── */}
+        {showPinModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+            onClick={() => { setShowPinModal(false); setSettingPin(false); }}>
+            <Card className="rounded-2xl shadow-lg w-full max-w-xs" onClick={(e) => e.stopPropagation()}>
+              <CardContent className="p-6">
+                <div className="flex flex-col items-center gap-2 mb-4">
+                  <Lock size={24} className="text-indigo-500" />
+                  <h2 className="text-base font-semibold text-slate-800">
+                    {settingPin ? "Set Your PIN" : "Enter PIN"}
+                  </h2>
+                </div>
+                {settingPin ? (
+                  <div className="grid gap-3">
+                    <Input type="password" inputMode="numeric" placeholder="Create a 4+ digit PIN"
+                      value={newPin} onChange={(e) => setNewPin(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && savePin()} autoFocus />
+                    {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
+                    <Button onClick={savePin} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">Save PIN</Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    <Input type="password" inputMode="numeric" placeholder="Enter PIN"
+                      value={pinInput} onChange={(e) => setPinInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && unlockApp()} autoFocus />
+                    {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
+                    <Button onClick={unlockApp} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">Unlock</Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {/* ── INPUT FORM ── */}
         <Card className="rounded-2xl shadow-md border-indigo-100 border">
@@ -643,7 +637,7 @@ export default function SBCashbackTracker() {
                       <p className={`text-xs font-medium ${s.text}`}>{title}</p>
                     </div>
                     <p className="text-xl font-bold text-slate-800">
-                      {isCount ? value : `₹${Number(value || 0).toFixed(2)}`}
+                      {isCount ? value : amt(value)}
                     </p>
                   </CardContent>
                 </Card>
@@ -664,7 +658,7 @@ export default function SBCashbackTracker() {
                       <Wallet size={14} className={c.text} />
                       <p className={`text-xs font-medium ${c.text}`}>{wallet.charAt(0).toUpperCase() + wallet.slice(1)} Gift Left</p>
                     </div>
-                    <p className="text-xl font-bold text-slate-800">₹{bal.toFixed(2)}</p>
+                    <p className="text-xl font-bold text-slate-800">{amt(bal)}</p>
                   </CardContent>
                 </Card>
               );
@@ -690,7 +684,7 @@ export default function SBCashbackTracker() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-slate-500">{inv.date}</span>
-                      <span className="font-bold text-fuchsia-700">₹{inv.amount.toFixed(2)}</span>
+                      <span className="font-bold text-fuchsia-700">{hidden ? "••••" : `₹${inv.amount.toFixed(2)}`}</span>
                       <button onClick={() => removeInvestment(inv.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                     </div>
                   </motion.div>
@@ -720,15 +714,15 @@ export default function SBCashbackTracker() {
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.badge}`}>
                             {gc.wallet}
                           </span>
-                          <span className="font-bold text-slate-800">₹{gc.originalAmount}</span>
-                          {gc.discountPct > 0 && (
+                          <span className="font-bold text-slate-800">{hidden ? "••••" : `₹${gc.originalAmount}`}</span>
+                          {gc.discountPct > 0 && !hidden && (
                             <span className="text-xs text-slate-500">({gc.discountPct}% off → paid ₹{gc.paidAmount?.toFixed(2) ?? gc.originalAmount})</span>
                           )}
                         </div>
                         <button onClick={() => removeGiftCard(gc.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>
                       <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-                        <span>Remaining: ₹{gc.remainingAmount} • {gc.date}</span>
+                        <span>{hidden ? "Remaining: ••••" : `Remaining: ₹${gc.remainingAmount}`} • {gc.date}</span>
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-1.5">
                         <div className={`h-1.5 rounded-full ${pct > 50 ? "bg-emerald-400" : pct > 20 ? "bg-amber-400" : "bg-red-400"}`}
@@ -779,10 +773,10 @@ export default function SBCashbackTracker() {
                       <div className="flex items-center gap-3 shrink-0">
                         <span className="text-xs text-slate-400">{t.date}</span>
                         <span className={`font-bold ${isInc ? "text-green-600" : "text-slate-800"}`}>
-                          {isInc ? "+" : ""}₹{t.amount.toFixed(2)}
+                          {hidden ? "••••" : `${isInc ? "+" : ""}₹${t.amount.toFixed(2)}`}
                         </span>
                         {t.savings > 0 && (
-                          <span className="text-xs text-emerald-600">saved ₹{t.savings.toFixed(2)}</span>
+                          <span className="text-xs text-emerald-600">{hidden ? "" : `saved ₹${t.savings.toFixed(2)}`}</span>
                         )}
                         <button onClick={() => removeTransaction(t.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>

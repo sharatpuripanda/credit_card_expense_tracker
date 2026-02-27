@@ -10,7 +10,7 @@ import {
   PlusCircle, Trash2, Plus, Gift, ShoppingBag,
   Wallet, TrendingUp, IndianRupee, Percent, ArrowDownCircle,
   ArrowUpCircle, CalendarDays, Landmark, Download, Upload, LogOut,
-  Eye, EyeOff,
+  Eye, EyeOff, Lock,
 } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 import {
@@ -85,14 +85,81 @@ export default function SBCashbackTracker() {
   const [dbLoading, setDbLoading]       = useState(true);
   // All amounts hidden by default; tap eye icon next to any value to peek
   const [revealed, setRevealed] = useState({});
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [settingPin, setSettingPin] = useState(false);
+  const [pendingPeekKey, setPendingPeekKey] = useState(null);
+
+  const pinKey = `sb-pin-${userId}`;
+  const getPin = () => typeof window !== "undefined" ? localStorage.getItem(pinKey) : null;
 
   const peek = (key) => {
-    setRevealed((prev) => ({ ...prev, [key]: !prev[key] }));
+    if (revealed[key]) {
+      // Already showing — just hide it
+      setRevealed((prev) => ({ ...prev, [key]: false }));
+      return;
+    }
+    const pin = getPin();
+    if (!pin) {
+      // No PIN set — reveal directly
+      setRevealed((prev) => ({ ...prev, [key]: true }));
+      return;
+    }
+    // PIN is set — ask for it
+    setPendingPeekKey(key);
+    setPinInput("");
+    setPinError("");
+    setShowPinModal(true);
+  };
+
+  const unlockPeek = () => {
+    if (pinInput === getPin()) {
+      if (pendingPeekKey === "__reveal_all__") {
+        // Reveal all values
+        setRevealed({});
+        // We'll use a special flag
+        setRevealed((prev) => {
+          const all = { ...prev };
+          // Just set a global reveal flag
+          all.__all__ = true;
+          return all;
+        });
+      } else if (pendingPeekKey) {
+        setRevealed((prev) => ({ ...prev, [pendingPeekKey]: true }));
+      }
+      setShowPinModal(false);
+      setPinInput("");
+      setPinError("");
+      setPendingPeekKey(null);
+    } else {
+      setPinError("Wrong PIN");
+    }
+  };
+
+  const saveNewPin = () => {
+    if (newPin.length < 4) {
+      setPinError("PIN must be at least 4 digits");
+      return;
+    }
+    localStorage.setItem(pinKey, newPin);
+    setSettingPin(false);
+    setShowPinModal(false);
+    setNewPin("");
+    setPinError("");
+  };
+
+  const openSetPin = () => {
+    setSettingPin(true);
+    setShowPinModal(true);
+    setNewPin("");
+    setPinError("");
   };
 
   // Helper: returns masked or real value + eye toggle button
   const amt = (value, key) => {
-    const show = revealed[key];
+    const show = revealed[key] || revealed.__all__;
     return (
       <span className="inline-flex items-center gap-1">
         <span>{show ? `₹${Number(value || 0).toFixed(2)}` : "••••"}</span>
@@ -396,6 +463,9 @@ export default function SBCashbackTracker() {
             </h1>
           </div>
           <div className="flex gap-2">
+            <Button onClick={openSetPin} variant="ghost" size="icon" title={getPin() ? "Change PIN" : "Set PIN"}>
+              <Lock size={18} className={getPin() ? "text-emerald-500" : "text-slate-500"} />
+            </Button>
             <Button onClick={exportData} variant="ghost" size="icon" title="Export backup">
               <Download size={18} className="text-slate-500" />
             </Button>
@@ -408,6 +478,41 @@ export default function SBCashbackTracker() {
           </div>
         </motion.div>
 
+
+        {/* ── PIN MODAL ── */}
+        {showPinModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+            onClick={() => { setShowPinModal(false); setSettingPin(false); setPendingPeekKey(null); }}>
+            <Card className="rounded-2xl shadow-lg w-full max-w-xs" onClick={(e) => e.stopPropagation()}>
+              <CardContent className="p-6">
+                <div className="flex flex-col items-center gap-2 mb-4">
+                  <Lock size={24} className="text-indigo-500" />
+                  <h2 className="text-base font-semibold text-slate-800">
+                    {settingPin ? (getPin() ? "Change PIN" : "Set Your PIN") : "Enter PIN"}
+                  </h2>
+                </div>
+                {settingPin ? (
+                  <div className="grid gap-3">
+                    <Input type="password" inputMode="numeric" placeholder="Enter a 4+ digit PIN"
+                      value={newPin} onChange={(e) => setNewPin(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && saveNewPin()} autoFocus />
+                    {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
+                    <Button onClick={saveNewPin} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">Save PIN</Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    <Input type="password" inputMode="numeric" placeholder="Enter PIN"
+                      value={pinInput} onChange={(e) => setPinInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && unlockPeek()} autoFocus />
+                    {pinError && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{pinError}</p>}
+                    <Button onClick={unlockPeek} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">Unlock</Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {/* ── INPUT FORM ── */}
         <Card className="rounded-2xl shadow-md border-indigo-100 border">

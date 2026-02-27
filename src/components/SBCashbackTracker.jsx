@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +9,15 @@ import { motion } from "framer-motion";
 import {
   PlusCircle, Trash2, Plus, Gift, ShoppingBag,
   Wallet, TrendingUp, IndianRupee, Percent, ArrowDownCircle,
-  ArrowUpCircle, CalendarDays, Landmark, Download, Upload,
+  ArrowUpCircle, CalendarDays, Landmark, Download, Upload, LogOut,
 } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
+import {
+  fetchTransactions, insertTransaction, deleteTransaction, replaceAllTransactions,
+  fetchGiftCards, upsertGiftCards,
+  fetchWallets, saveWallets,
+  fetchInvestments, upsertInvestments,
+} from "@/lib/db";
 
 /* ── constants ── */
 const DEFAULT_WALLETS = ["amazon", "flipkart"];
@@ -65,40 +72,67 @@ function isThisYear(dateStr) {
   return new Date(dateStr + "T00:00:00").getFullYear() === new Date().getFullYear();
 }
 
-/* ── seed data ── */
-const SEED_TRANSACTIONS = [
-  { id: 1001, date: "2026-02-17", description: "jio mart", amount: 250, type: "giftcard_purchase", wallet: "jio mart", savings: 19.63, savingsPct: 5, gcDiscountPct: 3, paidAmount: 242.5, linkedGiftCardId: "1001", investCategory: "" },
-  { id: 1002, date: "2026-02-23", description: "flipkart balance", amount: 11869, type: "giftcard_purchase", wallet: "flipkart", savings: 1100.85, savingsPct: 5, gcDiscountPct: 4.5, paidAmount: 11334.895, linkedGiftCardId: "1002", investCategory: "" },
-  { id: 1003, date: "2026-02-23", description: "ps5 gift card", amount: 5000, type: "giftcard_purchase", wallet: "ps5", savings: 392.50, savingsPct: 5, gcDiscountPct: 3, paidAmount: 4850, linkedGiftCardId: "1003", investCategory: "" },
-  { id: 1004, date: "2026-02-23", description: "amount left in bank account", amount: 6291, type: "income", wallet: "", savings: 0, savingsPct: 0, gcDiscountPct: 0, paidAmount: 6291, linkedGiftCardId: "", investCategory: "" },
-  { id: 1005, date: "2026-02-23", description: "Sbi card unutilised +zero balance", amount: 16718, type: "income", wallet: "", savings: 0, savingsPct: 0, gcDiscountPct: 0, paidAmount: 16718, linkedGiftCardId: "", investCategory: "" },
-  { id: 1006, date: "2026-02-23", description: "ps5 card just", amount: 5000, type: "income", wallet: "", savings: 0, savingsPct: 0, gcDiscountPct: 0, paidAmount: 5000, linkedGiftCardId: "", investCategory: "" },
-];
-
-const SEED_GIFTCARDS = [
-  { id: 1001, wallet: "jio mart", originalAmount: 250, remainingAmount: 250, description: "jio mart", date: "2026-02-17", discountPct: 3, paidAmount: 242.5 },
-  { id: 1002, wallet: "flipkart", originalAmount: 11869, remainingAmount: 11869, description: "flipkart balance", date: "2026-02-23", discountPct: 4.5, paidAmount: 11334.895 },
-  { id: 1003, wallet: "ps5", originalAmount: 5000, remainingAmount: 5000, description: "ps5 gift card", date: "2026-02-23", discountPct: 3, paidAmount: 4850 },
-];
-
-const SEED_WALLETS = ["jio mart", "ps5"];
-
 /* ══════════════════════════════════════════════════════════════ */
 export default function SBCashbackTracker() {
-  const load = (key, fallback) => {
-    const s = typeof window !== "undefined" ? localStorage.getItem(key) : null;
-    return s ? JSON.parse(s) : fallback;
-  };
+  const { user, signOut } = useAuth();
+  const userId = user.id;
 
-  const [transactions, setTransactions] = useState(() => load("sb-transactions", SEED_TRANSACTIONS));
-  const [giftCards, setGiftCards]       = useState(() => load("sb-giftcards", SEED_GIFTCARDS));
-  const [customWallets, setCustomWallets] = useState(() => load("sb-wallets", SEED_WALLETS));
-  const [investments, setInvestments]   = useState(() => load("sb-investments", []));
+  const [transactions, setTransactions] = useState([]);
+  const [giftCards, setGiftCards]       = useState([]);
+  const [customWallets, setCustomWallets] = useState([]);
+  const [investments, setInvestments]   = useState([]);
+  const [dbLoading, setDbLoading]       = useState(true);
 
-  useEffect(() => localStorage.setItem("sb-transactions", JSON.stringify(transactions)), [transactions]);
-  useEffect(() => localStorage.setItem("sb-giftcards", JSON.stringify(giftCards)), [giftCards]);
-  useEffect(() => localStorage.setItem("sb-wallets", JSON.stringify(customWallets)), [customWallets]);
-  useEffect(() => localStorage.setItem("sb-investments", JSON.stringify(investments)), [investments]);
+  // Track whether initial load is done to avoid saving back on mount
+  const loaded = useRef(false);
+
+  // ── Load from Supabase on mount ──
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [txns, gcs, wallets, invs] = await Promise.all([
+          fetchTransactions(userId),
+          fetchGiftCards(userId),
+          fetchWallets(userId),
+          fetchInvestments(userId),
+        ]);
+        if (cancelled) return;
+        setTransactions(txns);
+        setGiftCards(gcs);
+        setCustomWallets(wallets);
+        setInvestments(invs);
+      } catch (err) {
+        console.error("Failed to load data:", err);
+      } finally {
+        if (!cancelled) {
+          setDbLoading(false);
+          // Small delay so the initial setState doesn't trigger saves
+          setTimeout(() => { loaded.current = true; }, 100);
+        }
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // ── Sync gift cards to Supabase when they change ──
+  useEffect(() => {
+    if (!loaded.current) return;
+    upsertGiftCards(userId, giftCards).catch(console.error);
+  }, [giftCards, userId]);
+
+  // ── Sync wallets to Supabase when they change ──
+  useEffect(() => {
+    if (!loaded.current) return;
+    saveWallets(userId, customWallets).catch(console.error);
+  }, [customWallets, userId]);
+
+  // ── Sync investments to Supabase when they change ──
+  useEffect(() => {
+    if (!loaded.current) return;
+    upsertInvestments(userId, investments).catch(console.error);
+  }, [investments, userId]);
 
   const allWallets = useMemo(() => {
     const fromGC = giftCards.map((g) => g.wallet?.toLowerCase()).filter(Boolean);
@@ -122,10 +156,13 @@ export default function SBCashbackTracker() {
       const file = e.target.files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = async (ev) => {
         try {
           const data = JSON.parse(ev.target.result);
-          if (data.transactions) setTransactions(data.transactions);
+          if (data.transactions) {
+            setTransactions(data.transactions);
+            await replaceAllTransactions(userId, data.transactions);
+          }
           if (data.giftCards) setGiftCards(data.giftCards);
           if (data.customWallets) setCustomWallets(data.customWallets);
           if (data.investments) setInvestments(data.investments);
@@ -134,7 +171,7 @@ export default function SBCashbackTracker() {
       reader.readAsText(file);
     };
     input.click();
-  }, []);
+  }, [userId]);
 
   /* ── form state ── */
   const todayStr = new Date().toISOString().split("T")[0];
@@ -205,13 +242,15 @@ export default function SBCashbackTracker() {
       }]);
     }
 
-    setTransactions([...transactions, {
+    const newTxn = {
       ...form, id: txnId, amount: amountNum, savings: totalSaving,
       savingsPct: isExpense ? savingsPct : 0,
       gcDiscountPct: isGCPurchase ? gcDiscountPct : 0,
       paidAmount: actualPaid, date: dateVal, linkedGiftCardId,
       investCategory: isInvestment ? form.investCategory : "",
-    }]);
+    };
+    setTransactions([...transactions, newTxn]);
+    insertTransaction(userId, newTxn).catch(console.error);
 
     setForm((prev) => ({
       date: todayStr, description: "", amount: "", savingsPct: String(DEFAULT_SAVINGS_PCT),
@@ -236,6 +275,7 @@ export default function SBCashbackTracker() {
       }
     }
     setTransactions(transactions.filter((t) => t.id !== id));
+    deleteTransaction(userId, id).catch(console.error);
   };
 
   const removeGiftCard = (gcId) => setGiftCards((prev) => prev.filter((gc) => gc.id !== gcId));
@@ -287,6 +327,14 @@ export default function SBCashbackTracker() {
   }, [transactions, giftCards, allWallets]);
 
   /* ── render ── */
+  if (dbLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-indigo-50">
+        <p className="text-slate-500 text-sm">Loading your data...</p>
+      </div>
+    );
+  }
+
   const showWallet = isGCPurchase;
   const showGCPicker = form.type === "giftcard_spend";
   const showSavings = isExpense;
@@ -333,6 +381,9 @@ export default function SBCashbackTracker() {
             </Button>
             <Button onClick={importData} variant="ghost" size="icon" title="Import backup">
               <Upload size={18} className="text-slate-500" />
+            </Button>
+            <Button onClick={signOut} variant="ghost" size="icon" title="Sign out">
+              <LogOut size={18} className="text-slate-500" />
             </Button>
           </div>
         </motion.div>

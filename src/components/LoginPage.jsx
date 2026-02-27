@@ -29,7 +29,12 @@ export default function LoginPage() {
     if (authError) {
       setError(authError.message);
     } else if (isSignUp) {
-      setMessage("Check your email for a confirmation link.");
+      setMessage("Account created! Signing you in...");
+      // Auto-switch to sign in view after brief delay
+      setTimeout(() => {
+        setIsSignUp(false);
+        setMessage("");
+      }, 1500);
     }
   };
 

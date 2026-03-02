@@ -370,7 +370,8 @@ export default function SBCashbackTracker() {
 
   /* ── summary ── */
   const summary = useMemo(() => {
-    const expenseThisYear = transactions.filter((t) => t.type !== "income" && t.type !== "investment" && isThisYear(t.date));
+    // Exclude giftcard_spend from expense totals — that money was already counted when the gift card was bought
+    const expenseThisYear = transactions.filter((t) => t.type !== "income" && t.type !== "investment" && t.type !== "giftcard_spend" && isThisYear(t.date));
     const incomeThisYear = transactions.filter((t) => t.type === "income" && isThisYear(t.date));
     const investThisYear = transactions.filter((t) => t.type === "investment" && isThisYear(t.date));
 
@@ -379,9 +380,9 @@ export default function SBCashbackTracker() {
     const overallSavings = expenseThisYear.reduce((s, t) => s + Number(t.savings || 0), 0);
     const totalInvested = investThisYear.reduce((s, t) => s + t.amount, 0);
 
-    // All-time net balance
+    // All-time net balance (also exclude giftcard_spend from expenses)
     const allIncome = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-    const allExpense = transactions.filter((t) => t.type !== "income" && t.type !== "investment").reduce((s, t) => s + t.amount, 0);
+    const allExpense = transactions.filter((t) => t.type !== "income" && t.type !== "investment" && t.type !== "giftcard_spend").reduce((s, t) => s + t.amount, 0);
     const netBalance = allIncome - allExpense;
 
     const totalGCBought = expenseThisYear.filter((t) => t.type === "giftcard_purchase").reduce((s, t) => s + t.amount, 0);
@@ -399,12 +400,14 @@ export default function SBCashbackTracker() {
       return d >= cycleStart && d <= cycleEnd;
     };
     const allTxns = transactions;
-    const cycleExpense = allTxns.filter((t) => t.type !== "income" && t.type !== "investment").filter(inCycle).reduce((s, t) => s + t.amount, 0);
+    // Cycle expense also excludes giftcard_spend
+    const cycleExpense = allTxns.filter((t) => t.type !== "income" && t.type !== "investment" && t.type !== "giftcard_spend").filter(inCycle).reduce((s, t) => s + t.amount, 0);
     const cycleIncome = allTxns.filter((t) => t.type === "income").filter(inCycle).reduce((s, t) => s + t.amount, 0);
     const cycleGCBought = allTxns.filter((t) => t.type === "giftcard_purchase").filter(inCycle).reduce((s, t) => s + t.amount, 0);
     const cycleGCSpent = allTxns.filter((t) => t.type === "giftcard_spend").filter(inCycle).reduce((s, t) => s + t.amount, 0);
     const cycleInvested = allTxns.filter((t) => t.type === "investment").filter(inCycle).reduce((s, t) => s + t.amount, 0);
-    const cycleSavings = allTxns.filter((t) => t.type !== "income" && t.type !== "investment").filter(inCycle).reduce((s, t) => s + Number(t.savings || 0), 0);
+    // Cycle savings also excludes giftcard_spend
+    const cycleSavings = allTxns.filter((t) => t.type !== "income" && t.type !== "investment" && t.type !== "giftcard_spend").filter(inCycle).reduce((s, t) => s + Number(t.savings || 0), 0);
     const cycleGCDiscount = allTxns.filter((t) => t.type === "giftcard_purchase").filter(inCycle).reduce((s, t) => {
       const gcDisc = Number(t.gcDiscountPct || 0);
       return s + (gcDisc > 0 ? t.amount * (gcDisc / 100) : 0);
